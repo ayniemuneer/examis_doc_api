@@ -15,24 +15,35 @@ class MarksData(BaseModel):
     mcq_points: int
     short_points: int
     long_points: int
+    fib_points: Optional[int] = 1  # Added so the API doesn't crash if the app forgets to send it
 
 class MCQItem(BaseModel):
     question: str
     options: List[str]
     target_clo: Optional[str] = None
+    image_url: Optional[HttpUrl] = None
 
 class ShortQuestionItem(BaseModel):
     question: str
     target_clo: Optional[str] = None
+    image_url: Optional[HttpUrl] = None
 
 class LongQuestionItem(BaseModel):
     question: str
     target_clo: Optional[str] = None
+    image_url: Optional[HttpUrl] = None
+
+class FillInTheBlankItem(BaseModel):
+    question: str
+    answer: str 
+    target_clo: Optional[str] = None
+    image_url: Optional[HttpUrl] = None
 
 class ExamData(BaseModel):
     title: str
     marks: MarksData
     mcqs: List[MCQItem] = []
+    fillInTheBlanks: List[FillInTheBlankItem] = []
     shortQuestions: List[ShortQuestionItem] = []
     longQuestions: List[LongQuestionItem] = []
 
@@ -68,18 +79,31 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
         p.add_run(title).bold = True
         p.add_run(f"\t{marks_str}").bold = True
 
+    # NEW HELPER: Download and insert image serverlessly
+    def insert_image_if_exists(img_url):
+        if img_url:
+            try:
+                img_response = requests.get(str(img_url))
+                if img_response.status_code == 200:
+                    img_stream = io.BytesIO(img_response.content)
+                    doc.add_picture(img_stream, width=Inches(4.5))
+            except Exception as e:
+                print(f"Warning: Failed to load image - {e}")
+
     # 3. Write MCQs
     if exam.mcqs:
         add_section_header("Section A: Multiple Choice Questions", exam.marks.mcq_points, len(exam.mcqs))
         for i, mcq in enumerate(exam.mcqs, 1):
             p = doc.add_paragraph()
             
-            # Format question text with optional CLO tag
             q_text = f"{i}. {mcq.question}"
             if show_clo and mcq.target_clo:
                 q_text += f" [{mcq.target_clo}]"
                 
             p.add_run(q_text).bold = True
+            
+            # Check for and insert image
+            insert_image_if_exists(mcq.image_url)
             
             labels = ['a)', 'b)', 'c)', 'd)']
             for idx, option in enumerate(mcq.options):
@@ -88,9 +112,24 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                     opt_p.paragraph_format.left_indent = Inches(0.5)
         doc.add_paragraph() 
 
-    # 4. Write Short Questions
+    # 4. Write Fill in the Blanks (NEW SECTION)
+    if exam.fillInTheBlanks:
+        add_section_header("Section B: Fill in the Blanks", exam.marks.fib_points, len(exam.fillInTheBlanks))
+        for i, fib in enumerate(exam.fillInTheBlanks, 1):
+            p = doc.add_paragraph()
+            
+            q_text = f"{i}. {fib.question}"
+            if show_clo and fib.target_clo:
+                q_text += f" [{fib.target_clo}]"
+                
+            p.add_run(q_text).bold = True
+            
+            insert_image_if_exists(fib.image_url)
+        doc.add_paragraph()
+
+    # 5. Write Short Questions
     if exam.shortQuestions:
-        add_section_header("Section B: Short Answer Questions", exam.marks.short_points, len(exam.shortQuestions))
+        add_section_header("Section C: Short Answer Questions", exam.marks.short_points, len(exam.shortQuestions))
         for i, sq in enumerate(exam.shortQuestions, 1):
             p = doc.add_paragraph()
             
@@ -99,12 +138,15 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 q_text += f" [{sq.target_clo}]"
                 
             p.add_run(q_text).bold = True
+            
+            insert_image_if_exists(sq.image_url)
+            
             for _ in range(3):
                 doc.add_paragraph()
 
-    # 5. Write Long Questions
+    # 6. Write Long Questions
     if exam.longQuestions:
-        add_section_header("Section C: Long Answer Questions", exam.marks.long_points, len(exam.longQuestions))
+        add_section_header("Section D: Long Answer Questions", exam.marks.long_points, len(exam.longQuestions))
         for i, lq in enumerate(exam.longQuestions, 1):
             p = doc.add_paragraph()
             
@@ -113,10 +155,13 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 q_text += f" [{lq.target_clo}]"
                 
             p.add_run(q_text).bold = True
+            
+            insert_image_if_exists(lq.image_url)
+            
             if i < len(exam.longQuestions):
                 doc.add_page_break() 
 
-    # 6. Save modified document to a new memory stream
+    # Save modified document to a new memory stream
     output_stream = io.BytesIO()
     doc.save(output_stream)
     output_stream.seek(0) 
@@ -134,7 +179,6 @@ async def generate_document(request_data: DocumentRequest):
             "Content-Disposition": "attachment; filename=generated_exam.docx"
         }
         
-        # Switched to StreamingResponse for optimal Serverless memory management
         return StreamingResponse(
             final_doc_stream,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
