@@ -17,6 +17,10 @@ class MarksData(BaseModel):
     long_points: int
     fib_points: Optional[int] = 1
 
+class CustomScenarioItem(BaseModel):
+    text: str
+    marks: Optional[int] = 0
+
 class MCQItem(BaseModel):
     question: str
     options: List[str]
@@ -42,6 +46,7 @@ class FillInTheBlankItem(BaseModel):
 class ExamData(BaseModel):
     title: str
     marks: MarksData
+    custom_scenarios: List[CustomScenarioItem] = []  # NEW: Added Custom Scenarios array
     mcqs: List[MCQItem] = []
     fillInTheBlanks: List[FillInTheBlankItem] = []
     shortQuestions: List[ShortQuestionItem] = []
@@ -85,6 +90,17 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                     doc.add_picture(img_stream, width=Inches(4.5))
             except Exception as e:
                 print(f"Warning: Failed to load image - {e}")
+
+    # NEW: Write Custom Scenarios / Case Studies
+    if exam.custom_scenarios:
+        scenarios_header = doc.add_paragraph()
+        scenarios_header.add_run("Case Studies / Scenarios").bold = True
+        
+        for i, scenario in enumerate(exam.custom_scenarios, 1):
+            p = doc.add_paragraph()
+            p.add_run(f"Scenario {i} ({scenario.marks} Marks)").bold = True
+            doc.add_paragraph(scenario.text)
+        doc.add_paragraph() # Add space before the next section begins
 
     # Write MCQs
     if exam.mcqs:
