@@ -43,6 +43,13 @@ class FillInTheBlankItem(BaseModel):
     target_clo: Optional[str] = None
     image_url: Optional[HttpUrl] = None
 
+# NEW: Diagram Question Model
+class DiagramQuestionItem(BaseModel):
+    question: str
+    image_url: HttpUrl
+    target_clo: Optional[str] = None
+    marks: Optional[int] = 0
+
 class ExamData(BaseModel):
     title: str
     marks: MarksData
@@ -51,6 +58,8 @@ class ExamData(BaseModel):
     fillInTheBlanks: List[FillInTheBlankItem] = []
     shortQuestions: List[ShortQuestionItem] = []
     longQuestions: List[LongQuestionItem] = []
+    diagram_questions: List[DiagramQuestionItem] = [] # NEW: Added to payload
+
 
 class DocumentRequest(BaseModel):
     template_url: HttpUrl
@@ -158,6 +167,21 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             p.add_run(q_text).bold = True
             insert_image_if_exists(lq.image_url)
             doc.add_paragraph()  # Removed page breaks to save pages!
+
+    # NEW: Write Diagram Questions (At the very end)
+    if exam.diagram_questions:
+        doc.add_paragraph() # Add a little space before the section
+        diag_header = doc.add_paragraph()
+        diag_header.add_run("Diagrams & Visuals").bold = True
+        
+        for i, dq in enumerate(exam.diagram_questions, 1):
+            p = doc.add_paragraph()
+            q_text = f"{i}. {dq.question} ({dq.marks} Marks)"
+            if show_clo and dq.target_clo:
+                q_text += f" [{dq.target_clo}]"
+            p.add_run(q_text).bold = True
+            insert_image_if_exists(dq.image_url)
+            doc.add_paragraph()
 
     output_stream = io.BytesIO()
     doc.save(output_stream)
