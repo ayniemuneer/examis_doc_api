@@ -46,7 +46,7 @@ class FillInTheBlankItem(BaseModel):
 class ExamData(BaseModel):
     title: str
     marks: MarksData
-    custom_scenarios: List[CustomScenarioItem] = []  # NEW: Added Custom Scenarios array
+    custom_scenarios: List[CustomScenarioItem] = []
     mcqs: List[MCQItem] = []
     fillInTheBlanks: List[FillInTheBlankItem] = []
     shortQuestions: List[ShortQuestionItem] = []
@@ -69,9 +69,13 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
     exam = payload.exam_data
     show_clo = payload.show_clo_tags
 
+    # Locate the anchor point and add the italic instructions
     for p in doc.paragraphs:
         if "{{START_EXAM_HERE}}" in p.text:
             p.text = p.text.replace("{{START_EXAM_HERE}}", "")
+            instructions = "[Encircle the correct options. Overwriting will not be entertained. Multiple answers in fill in the blanks will be considered void.]"
+            inst_run = p.add_run(instructions)
+            inst_run.italic = True
 
     def add_section_header(title: str, points: int, count: int):
         p = doc.add_paragraph()
@@ -91,20 +95,19 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             except Exception as e:
                 print(f"Warning: Failed to load image - {e}")
 
-    # NEW: Write Custom Scenarios / Case Studies
+    # Write Custom Scenarios
     if exam.custom_scenarios:
         scenarios_header = doc.add_paragraph()
         scenarios_header.add_run("Case Studies / Scenarios").bold = True
-        
         for i, scenario in enumerate(exam.custom_scenarios, 1):
             p = doc.add_paragraph()
             p.add_run(f"Scenario {i} ({scenario.marks} Marks)").bold = True
             doc.add_paragraph(scenario.text)
-        doc.add_paragraph() # Add space before the next section begins
+        doc.add_paragraph()
 
     # Write MCQs
     if exam.mcqs:
-        add_section_header("Section A: Multiple Choice Questions", exam.marks.mcq_points, len(exam.mcqs))
+        add_section_header("Multiple Choice Questions", exam.marks.mcq_points, len(exam.mcqs))
         for i, mcq in enumerate(exam.mcqs, 1):
             p = doc.add_paragraph()
             q_text = f"{i}. {mcq.question}"
@@ -113,16 +116,16 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             p.add_run(q_text).bold = True
             insert_image_if_exists(mcq.image_url)
             
+            # Formats options on the same line using spaces
             labels = ['a)', 'b)', 'c)', 'd)']
-            for idx, option in enumerate(mcq.options):
-                if idx < len(labels):
-                    opt_p = doc.add_paragraph(f"{labels[idx]} {option}")
-                    opt_p.paragraph_format.left_indent = Inches(0.5)
+            formatted_options = "    ".join([f"{labels[idx]} {opt}" for idx, opt in enumerate(mcq.options) if idx < len(labels)])
+            opt_p = doc.add_paragraph(formatted_options)
+            opt_p.paragraph_format.left_indent = Inches(0.5)
         doc.add_paragraph() 
 
     # Write Fill in the Blanks
     if exam.fillInTheBlanks:
-        add_section_header("Section B: Fill in the Blanks", exam.marks.fib_points, len(exam.fillInTheBlanks))
+        add_section_header("Fill in the Blanks", exam.marks.fib_points, len(exam.fillInTheBlanks))
         for i, fib in enumerate(exam.fillInTheBlanks, 1):
             p = doc.add_paragraph()
             q_text = f"{i}. {fib.question}"
@@ -134,7 +137,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
 
     # Write Short Questions
     if exam.shortQuestions:
-        add_section_header("Section C: Short Answer Questions", exam.marks.short_points, len(exam.shortQuestions))
+        add_section_header("Short Answer Questions", exam.marks.short_points, len(exam.shortQuestions))
         for i, sq in enumerate(exam.shortQuestions, 1):
             p = doc.add_paragraph()
             q_text = f"{i}. {sq.question}"
@@ -142,12 +145,11 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 q_text += f" [{sq.target_clo}]"
             p.add_run(q_text).bold = True
             insert_image_if_exists(sq.image_url)
-            for _ in range(3):
-                doc.add_paragraph()
+            doc.add_paragraph()  # Reduced spacing to save pages!
 
     # Write Long Questions
     if exam.longQuestions:
-        add_section_header("Section D: Long Answer Questions", exam.marks.long_points, len(exam.longQuestions))
+        add_section_header("Long Answer Questions", exam.marks.long_points, len(exam.longQuestions))
         for i, lq in enumerate(exam.longQuestions, 1):
             p = doc.add_paragraph()
             q_text = f"{i}. {lq.question}"
@@ -155,8 +157,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 q_text += f" [{lq.target_clo}]"
             p.add_run(q_text).bold = True
             insert_image_if_exists(lq.image_url)
-            if i < len(exam.longQuestions):
-                doc.add_page_break() 
+            doc.add_paragraph()  # Removed page breaks to save pages!
 
     output_stream = io.BytesIO()
     doc.save(output_stream)
