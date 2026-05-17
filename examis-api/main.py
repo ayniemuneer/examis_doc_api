@@ -6,7 +6,8 @@ import requests
 import io
 from docx import Document
 from docx.shared import Inches
-from docx.enum.text import WD_TAB_ALIGNMENT
+from docx.enum.text import WD_TAB_ALIGNMENT, WD_ALIGN_PARAGRAPH
+from PIL import Image, ImageOps
 
 app = FastAPI(title="Examis AI Document Generator")
 
@@ -43,7 +44,6 @@ class FillInTheBlankItem(BaseModel):
     target_clo: Optional[str] = None
     image_url: Optional[HttpUrl] = None
 
-# NEW: Diagram Question Model
 class DiagramQuestionItem(BaseModel):
     question: str
     image_url: HttpUrl
@@ -58,7 +58,7 @@ class ExamData(BaseModel):
     fillInTheBlanks: List[FillInTheBlankItem] = []
     shortQuestions: List[ShortQuestionItem] = []
     longQuestions: List[LongQuestionItem] = []
-    diagram_questions: List[DiagramQuestionItem] = [] # NEW: Added to payload
+    diagram_questions: List[DiagramQuestionItem] = [] 
 
 
 class DocumentRequest(BaseModel):
@@ -100,7 +100,34 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 img_response = requests.get(str(img_url))
                 if img_response.status_code == 200:
                     img_stream = io.BytesIO(img_response.content)
-                    doc.add_picture(img_stream, width=Inches(4.5))
+                    
+                    # --- 1. THE EXIF ROTATION FIX ---
+                    # Open the image with Pillow
+                    img = Image.open(img_stream)
+                    
+                    # Automatically rotate it upright based on phone camera EXIF data
+                    img = ImageOps.exif_transpose(img)
+                    
+                    # Prevent color mode errors
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                        
+                    # Save the fixed, upright image back to a new RAM stream
+                    fixed_stream = io.BytesIO()
+                    img.save(fixed_stream, format='PNG')
+                    fixed_stream.seek(0)
+
+                    # --- 2. THE ALIGNMENT FIX ---
+                    # Create a brand new, clean paragraph just for the image
+                    img_paragraph = doc.add_paragraph()
+                    
+                    # Force the paragraph to align strictly to the LEFT 
+                    img_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    
+                    # Add the fixed picture
+                    img_run = img_paragraph.add_run()
+                    img_run.add_picture(fixed_stream, width=Inches(4.5))
+                    
             except Exception as e:
                 print(f"Warning: Failed to load image - {e}")
 
@@ -154,7 +181,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 q_text += f" [{sq.target_clo}]"
             p.add_run(q_text).bold = True
             insert_image_if_exists(sq.image_url)
-            doc.add_paragraph()  # Reduced spacing to save pages!
+            doc.add_paragraph()  
 
     # Write Long Questions
     if exam.longQuestions:
@@ -166,11 +193,11 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 q_text += f" [{lq.target_clo}]"
             p.add_run(q_text).bold = True
             insert_image_if_exists(lq.image_url)
-            doc.add_paragraph()  # Removed page breaks to save pages!
+            doc.add_paragraph()  
 
-    # NEW: Write Diagram Questions (At the very end)
+    # Write Diagram Questions (At the very end)
     if exam.diagram_questions:
-        doc.add_paragraph() # Add a little space before the section
+        doc.add_paragraph() 
         diag_header = doc.add_paragraph()
         diag_header.add_run("Diagrams & Visuals").bold = True
         
