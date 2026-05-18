@@ -101,47 +101,32 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 if img_response.status_code == 200:
                     img_stream = io.BytesIO(img_response.content)
                     
-                    # --- 1. THE EXIF ROTATION FIX ---
-                    # Open the image with Pillow
+                    # --- THE EXIF ROTATION FIX ---
                     img = Image.open(img_stream)
-                    
-                    # Automatically rotate it upright based on phone camera EXIF data
                     img = ImageOps.exif_transpose(img)
                     
-                    # Prevent color mode errors
                     if img.mode in ("RGBA", "P"):
                         img = img.convert("RGB")
                         
-                    # Save the fixed, upright image back to a new RAM stream
                     fixed_stream = io.BytesIO()
                     img.save(fixed_stream, format='PNG')
                     fixed_stream.seek(0)
 
-                    # --- 2. THE ALIGNMENT FIX ---
-                    # Create a brand new, clean paragraph just for the image
+                    # --- THE ALIGNMENT FIX ---
                     img_paragraph = doc.add_paragraph()
-                    
-                    # Force the paragraph to align strictly to the LEFT 
                     img_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                     
-                    # Add the fixed picture
                     img_run = img_paragraph.add_run()
                     img_run.add_picture(fixed_stream, width=Inches(4.5))
                     
             except Exception as e:
                 print(f"Warning: Failed to load image - {e}")
 
-    # Write Custom Scenarios
-    if exam.custom_scenarios:
-        scenarios_header = doc.add_paragraph()
-        scenarios_header.add_run("Case Studies / Scenarios").bold = True
-        for i, scenario in enumerate(exam.custom_scenarios, 1):
-            p = doc.add_paragraph()
-            p.add_run(f"Scenario {i} ({scenario.marks} Marks)").bold = True
-            doc.add_paragraph(scenario.text)
-        doc.add_paragraph()
+    # ==========================================
+    # NEW REORDERED SECTION LOGIC
+    # ==========================================
 
-    # Write MCQs
+    # 1. Write MCQs (First)
     if exam.mcqs:
         add_section_header("Multiple Choice Questions", exam.marks.mcq_points, len(exam.mcqs))
         for i, mcq in enumerate(exam.mcqs, 1):
@@ -152,14 +137,13 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             p.add_run(q_text).bold = True
             insert_image_if_exists(mcq.image_url)
             
-            # Formats options on the same line using spaces
             labels = ['a)', 'b)', 'c)', 'd)']
             formatted_options = "    ".join([f"{labels[idx]} {opt}" for idx, opt in enumerate(mcq.options) if idx < len(labels)])
             opt_p = doc.add_paragraph(formatted_options)
             opt_p.paragraph_format.left_indent = Inches(0.5)
         doc.add_paragraph() 
 
-    # Write Fill in the Blanks
+    # 2. Write Fill in the Blanks (Second)
     if exam.fillInTheBlanks:
         add_section_header("Fill in the Blanks", exam.marks.fib_points, len(exam.fillInTheBlanks))
         for i, fib in enumerate(exam.fillInTheBlanks, 1):
@@ -171,7 +155,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             insert_image_if_exists(fib.image_url)
         doc.add_paragraph()
 
-    # Write Short Questions
+    # 3. Write Short Questions (Third)
     if exam.shortQuestions:
         add_section_header("Short Answer Questions", exam.marks.short_points, len(exam.shortQuestions))
         for i, sq in enumerate(exam.shortQuestions, 1):
@@ -183,7 +167,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             insert_image_if_exists(sq.image_url)
             doc.add_paragraph()  
 
-    # Write Long Questions
+    # 4. Write Long Questions (Fourth)
     if exam.longQuestions:
         add_section_header("Long Answer Questions", exam.marks.long_points, len(exam.longQuestions))
         for i, lq in enumerate(exam.longQuestions, 1):
@@ -195,7 +179,17 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             insert_image_if_exists(lq.image_url)
             doc.add_paragraph()  
 
-    # Write Diagram Questions (At the very end)
+    # 5. Write Scenarios / Code Sections (Fifth - With updated flexible wording!)
+    if exam.custom_scenarios:
+        scenarios_header = doc.add_paragraph()
+        scenarios_header.add_run("Scenarios & Code Analysis").bold = True
+        for i, scenario in enumerate(exam.custom_scenarios, 1):
+            p = doc.add_paragraph()
+            p.add_run(f"Question {i} ({scenario.marks} Marks)").bold = True
+            doc.add_paragraph(scenario.text)
+        doc.add_paragraph()
+
+    # 6. Write Diagram Questions (At the very end)
     if exam.diagram_questions:
         doc.add_paragraph() 
         diag_header = doc.add_paragraph()
