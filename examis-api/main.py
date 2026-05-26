@@ -52,9 +52,9 @@ class DiagramQuestionItem(BaseModel):
 
 class ExamData(BaseModel):
     title: str
+    department: str # NEW FIELD ADDED HERE!
     exam_type: str 
     total_marks: int 
-    # NEW FIELDS ADDED HERE!
     course_title: str
     credit_hours: str
     paper_type: str
@@ -85,13 +85,14 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
     show_clo = payload.show_clo_tags
 
     # --- SENIOR DEV REFACTOR: The Replacement Dictionary ---
-    # This stores all our tags in one clean place so we don't need 15 'if' statements.
     replacements = {
         "{{ exam_data.exam_type }}": str(exam.exam_type),
         "{{ exam_data.total_marks }}": str(exam.total_marks),
         "{{ exam_data.course_title }}": str(exam.course_title),
         "{{ exam_data.credit_hours }}": str(exam.credit_hours),
-        "{{ exam_data.paper_type }}": str(exam.paper_type)
+        "{{ exam_data.paper_type }}": str(exam.paper_type),
+        "{{ department }}": str(exam.department),          # Supports the exact tag requested
+        "{{ exam_data.department }}": str(exam.department) # Also supports consistent naming
     }
 
     # Helper function to swap the tags
