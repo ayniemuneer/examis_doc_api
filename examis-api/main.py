@@ -54,6 +54,10 @@ class ExamData(BaseModel):
     title: str
     exam_type: str 
     total_marks: int 
+    # NEW FIELDS ADDED HERE!
+    course_title: str
+    credit_hours: str
+    paper_type: str
     marks: MarksData
     custom_scenarios: List[CustomScenarioItem] = []
     mcqs: List[MCQItem] = []
@@ -80,21 +84,30 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
     exam = payload.exam_data
     show_clo = payload.show_clo_tags
 
+    # --- SENIOR DEV REFACTOR: The Replacement Dictionary ---
+    # This stores all our tags in one clean place so we don't need 15 'if' statements.
+    replacements = {
+        "{{ exam_data.exam_type }}": str(exam.exam_type),
+        "{{ exam_data.total_marks }}": str(exam.total_marks),
+        "{{ exam_data.course_title }}": str(exam.course_title),
+        "{{ exam_data.credit_hours }}": str(exam.credit_hours),
+        "{{ exam_data.paper_type }}": str(exam.paper_type)
+    }
+
+    # Helper function to swap the tags
+    def replace_tags(p):
+        for tag, value in replacements.items():
+            if tag in p.text:
+                p.text = p.text.replace(tag, value)
+
     # 1. Search the official Word "Headers"
     for section in doc.sections:
         for header_p in section.header.paragraphs:
-            if "{{ exam_data.exam_type }}" in header_p.text:
-                header_p.text = header_p.text.replace("{{ exam_data.exam_type }}", str(exam.exam_type))
-            if "{{ exam_data.total_marks }}" in header_p.text:
-                header_p.text = header_p.text.replace("{{ exam_data.total_marks }}", str(exam.total_marks))
+            replace_tags(header_p)
 
     # 2. Search the main body paragraphs
     for p in doc.paragraphs:
-        if "{{ exam_data.exam_type }}" in p.text:
-            p.text = p.text.replace("{{ exam_data.exam_type }}", str(exam.exam_type))
-            
-        if "{{ exam_data.total_marks }}" in p.text:
-            p.text = p.text.replace("{{ exam_data.total_marks }}", str(exam.total_marks))
+        replace_tags(p)
 
         # Original Anchor Logic
         if "{{START_EXAM_HERE}}" in p.text:
@@ -103,15 +116,12 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             inst_run = p.add_run(instructions)
             inst_run.italic = True
 
-    # 3. Search inside Tables (Crucial for template layouts)
+    # 3. Search inside Tables
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    if "{{ exam_data.exam_type }}" in p.text:
-                        p.text = p.text.replace("{{ exam_data.exam_type }}", str(exam.exam_type))
-                    if "{{ exam_data.total_marks }}" in p.text:
-                        p.text = p.text.replace("{{ exam_data.total_marks }}", str(exam.total_marks))
+                    replace_tags(p)
 
     def add_section_header(title: str, points: int, count: int):
         p = doc.add_paragraph()
@@ -150,10 +160,10 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 print(f"Warning: Failed to load image - {e}")
 
     # ==========================================
-    # SECTION LOGIC (Reordered properly)
+    # SECTION LOGIC 
     # ==========================================
 
-    # 1. Write MCQs (First)
+    # 1. Write MCQs 
     if exam.mcqs:
         add_section_header("Multiple Choice Questions", exam.marks.mcq_points, len(exam.mcqs))
         for i, mcq in enumerate(exam.mcqs, 1):
@@ -170,7 +180,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             opt_p.paragraph_format.left_indent = Inches(0.5)
         doc.add_paragraph() 
 
-    # 2. Write Fill in the Blanks (Second)
+    # 2. Write Fill in the Blanks 
     if exam.fillInTheBlanks:
         add_section_header("Fill in the Blanks", exam.marks.fib_points, len(exam.fillInTheBlanks))
         for i, fib in enumerate(exam.fillInTheBlanks, 1):
@@ -182,7 +192,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             insert_image_if_exists(fib.image_url)
         doc.add_paragraph()
 
-    # 3. Write Short Questions (Third)
+    # 3. Write Short Questions 
     if exam.shortQuestions:
         add_section_header("Short Answer Questions", exam.marks.short_points, len(exam.shortQuestions))
         for i, sq in enumerate(exam.shortQuestions, 1):
@@ -194,7 +204,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             insert_image_if_exists(sq.image_url)
             doc.add_paragraph()  
 
-    # 4. Write Long Questions (Fourth)
+    # 4. Write Long Questions 
     if exam.longQuestions:
         add_section_header("Long Answer Questions", exam.marks.long_points, len(exam.longQuestions))
         for i, lq in enumerate(exam.longQuestions, 1):
@@ -206,7 +216,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             insert_image_if_exists(lq.image_url)
             doc.add_paragraph()  
 
-    # 5. Write Scenarios / Code Sections (Fifth)
+    # 5. Write Scenarios / Code Sections 
     if exam.custom_scenarios:
         scenarios_header = doc.add_paragraph()
         scenarios_header.add_run("Scenarios & Code Analysis").bold = True
@@ -216,7 +226,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             doc.add_paragraph(scenario.text)
         doc.add_paragraph()
 
-    # 6. Write Diagram Questions (At the very end)
+    # 6. Write Diagram Questions 
     if exam.diagram_questions:
         doc.add_paragraph() 
         diag_header = doc.add_paragraph()
