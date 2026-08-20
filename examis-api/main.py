@@ -95,6 +95,18 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
         "{{ exam_data.department }}": str(exam.department) # Also supports consistent naming
     }
 
+    # --- TEMPLATE VALIDATION CHECK ---
+    all_text = " ".join(
+        [p.text for section in doc.sections for p in section.header.paragraphs] +
+        [p.text for p in doc.paragraphs] +
+        [p.text for table in doc.tables for row in table.rows for cell in row.cells for p in cell.paragraphs]
+    )
+    has_anchor = "{{START_EXAM_HERE}}" in all_text
+    has_tags = any(tag in all_text for tag in replacements.keys())
+
+    if not has_anchor and not has_tags:
+        raise HTTPException(status_code=400, detail="The template does not have required tags")
+
     # Helper function to swap the tags
     def replace_tags(p):
         for tag, value in replacements.items():
@@ -261,5 +273,7 @@ async def generate_document(request_data: DocumentRequest):
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers=headers
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
