@@ -13,19 +13,19 @@ app = FastAPI(title="Examis AI Document Generator")
 
 # --- 1. PYDANTIC MODELS (Payload Validation) ---
 class MarksData(BaseModel):
-    mcq_points: int
-    short_points: int
-    long_points: int
-    fib_points: Optional[int] = 1
+    mcq_points: float
+    short_points: float
+    long_points: float
+    fib_points: Optional[float] = 1.0
 
 class SubPart(BaseModel):
     question: str
-    marks: int
+    marks: float
 
 class CustomScenarioItem(BaseModel):
     type: str
     text: str
-    marks: Optional[int] = 0
+    marks: Optional[float] = 0.0
     sub_parts: List[SubPart] = []
 
 class MCQItem(BaseModel):
@@ -56,13 +56,13 @@ class DiagramQuestionItem(BaseModel):
     question: str
     image_url: HttpUrl
     target_clo: Optional[str] = None
-    marks: Optional[int] = 0
+    marks: Optional[float] = 0.0
 
 class ExamData(BaseModel):
     title: str
     department: str
     exam_type: str 
-    total_marks: int 
+    total_marks: float 
     course_title: str
     credit_hours: str
     paper_type: str
@@ -92,9 +92,12 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
     exam = payload.exam_data
     show_clo = payload.show_clo_tags
 
+    # Format the total marks cleanly just in case it's a whole number
+    formatted_total_marks = f"{exam.total_marks:g}" if isinstance(exam.total_marks, float) else str(exam.total_marks)
+
     replacements = {
         "{{ exam_data.exam_type }}": str(exam.exam_type),
-        "{{ exam_data.total_marks }}": str(exam.total_marks),
+        "{{ exam_data.total_marks }}": formatted_total_marks,
         "{{ exam_data.course_title }}": str(exam.course_title),
         "{{ exam_data.credit_hours }}": str(exam.credit_hours),
         "{{ exam_data.paper_type }}": str(exam.paper_type),
@@ -138,11 +141,12 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                     replace_tags(p)
 
     # --- HELPER FORMATTING FUNCTIONS ---
-    def add_section_header(title: str, points: int, count: int):
+    def add_section_header(title: str, points: float, count: int):
         p = doc.add_paragraph()
         tab_stops = p.paragraph_format.tab_stops
         tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
-        marks_str = f"[{points} x {count}]"
+        # Using :g removes trailing zeros (e.g., 2.0 becomes 2, but 1.5 stays 1.5)
+        marks_str = f"[{points:g} x {count}]"
         p.add_run(title).bold = True
         p.add_run(f"\t{marks_str}").bold = True
 
@@ -156,7 +160,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             
             label = labels[idx] if idx < len(labels) else '(*)'
             p.add_run(f"{label} {sp.question}")
-            p.add_run(f"\t[{sp.marks} Marks]").bold = True
+            p.add_run(f"\t[{sp.marks:g} Marks]").bold = True
 
     def insert_image_if_exists(img_url):
         if img_url:
@@ -246,14 +250,12 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
 
     # 5. Write Scenarios / Custom Types
     if exam.custom_scenarios:
-        # Group incoming items by their defined 'type'
         grouped_items = {}
         for item in exam.custom_scenarios:
             if item.type not in grouped_items:
                 grouped_items[item.type] = []
             grouped_items[item.type].append(item)
             
-        # Generate a dynamic section for each type
         for item_type, items in grouped_items.items():
             doc.add_paragraph()
             type_header = doc.add_paragraph()
@@ -261,7 +263,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             
             for i, scenario in enumerate(items, 1):
                 p = doc.add_paragraph()
-                p.add_run(f"Question {i} ({scenario.marks} Marks)").bold = True
+                p.add_run(f"Question {i} ({scenario.marks:g} Marks)").bold = True
                 doc.add_paragraph(scenario.text)
                 
                 if scenario.sub_parts:
@@ -276,7 +278,7 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
         
         for i, dq in enumerate(exam.diagram_questions, 1):
             p = doc.add_paragraph()
-            q_text = f"{i}. {dq.question} ({dq.marks} Marks)"
+            q_text = f"{i}. {dq.question} ({dq.marks:g} Marks)"
             if show_clo and dq.target_clo:
                 q_text += f" [{dq.target_clo}]"
             p.add_run(q_text).bold = True
