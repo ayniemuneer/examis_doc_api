@@ -18,9 +18,15 @@ class MarksData(BaseModel):
     long_points: int
     fib_points: Optional[int] = 1
 
+class SubPart(BaseModel):
+    question: str
+    marks: int
+
 class CustomScenarioItem(BaseModel):
+    type: str
     text: str
     marks: Optional[int] = 0
+    sub_parts: List[SubPart] = []
 
 class MCQItem(BaseModel):
     question: str
@@ -32,11 +38,13 @@ class ShortQuestionItem(BaseModel):
     question: str
     target_clo: Optional[str] = None
     image_url: Optional[HttpUrl] = None
+    sub_parts: List[SubPart] = []
 
 class LongQuestionItem(BaseModel):
     question: str
     target_clo: Optional[str] = None
     image_url: Optional[HttpUrl] = None
+    sub_parts: List[SubPart] = []
 
 class FillInTheBlankItem(BaseModel):
     question: str
@@ -52,7 +60,7 @@ class DiagramQuestionItem(BaseModel):
 
 class ExamData(BaseModel):
     title: str
-    department: str # NEW FIELD ADDED HERE!
+    department: str
     exam_type: str 
     total_marks: int 
     course_title: str
@@ -84,15 +92,14 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
     exam = payload.exam_data
     show_clo = payload.show_clo_tags
 
-    # --- SENIOR DEV REFACTOR: The Replacement Dictionary ---
     replacements = {
         "{{ exam_data.exam_type }}": str(exam.exam_type),
         "{{ exam_data.total_marks }}": str(exam.total_marks),
         "{{ exam_data.course_title }}": str(exam.course_title),
         "{{ exam_data.credit_hours }}": str(exam.credit_hours),
         "{{ exam_data.paper_type }}": str(exam.paper_type),
-        "{{ department }}": str(exam.department),          # Supports the exact tag requested
-        "{{ exam_data.department }}": str(exam.department) # Also supports consistent naming
+        "{{ department }}": str(exam.department),
+        "{{ exam_data.department }}": str(exam.department)
     }
 
     # --- TEMPLATE VALIDATION CHECK ---
@@ -107,35 +114,30 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
     if not has_anchor and not has_tags:
         raise HTTPException(status_code=400, detail="The template does not have required tags")
 
-    # Helper function to swap the tags
     def replace_tags(p):
         for tag, value in replacements.items():
             if tag in p.text:
                 p.text = p.text.replace(tag, value)
 
-    # 1. Search the official Word "Headers"
     for section in doc.sections:
         for header_p in section.header.paragraphs:
             replace_tags(header_p)
 
-    # 2. Search the main body paragraphs
     for p in doc.paragraphs:
         replace_tags(p)
-
-        # Original Anchor Logic
         if "{{START_EXAM_HERE}}" in p.text:
             p.text = p.text.replace("{{START_EXAM_HERE}}", "")
             instructions = "[Encircle the correct options. Overwriting will not be entertained. Multiple answers in fill in the blanks will be considered void.]"
             inst_run = p.add_run(instructions)
             inst_run.italic = True
 
-    # 3. Search inside Tables
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
                     replace_tags(p)
 
+    # --- HELPER FORMATTING FUNCTIONS ---
     def add_section_header(title: str, points: int, count: int):
         p = doc.add_paragraph()
         tab_stops = p.paragraph_format.tab_stops
@@ -144,14 +146,24 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
         p.add_run(title).bold = True
         p.add_run(f"\t{marks_str}").bold = True
 
+    def write_sub_parts(sub_parts: List[SubPart]):
+        labels = ['(a)', '(b)', '(c)', '(d)', '(e)', '(f)', '(g)', '(h)', '(i)', '(j)']
+        for idx, sp in enumerate(sub_parts):
+            p = doc.add_paragraph()
+            p.paragraph_format.left_indent = Inches(0.5)
+            tab_stops = p.paragraph_format.tab_stops
+            tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+            
+            label = labels[idx] if idx < len(labels) else '(*)'
+            p.add_run(f"{label} {sp.question}")
+            p.add_run(f"\t[{sp.marks} Marks]").bold = True
+
     def insert_image_if_exists(img_url):
         if img_url:
             try:
                 img_response = requests.get(str(img_url))
                 if img_response.status_code == 200:
                     img_stream = io.BytesIO(img_response.content)
-                    
-                    # --- THE EXIF ROTATION FIX ---
                     img = Image.open(img_stream)
                     img = ImageOps.exif_transpose(img)
                     
@@ -162,13 +174,10 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                     img.save(fixed_stream, format='PNG')
                     fixed_stream.seek(0)
 
-                    # --- THE ALIGNMENT FIX ---
                     img_paragraph = doc.add_paragraph()
                     img_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                    
                     img_run = img_paragraph.add_run()
                     img_run.add_picture(fixed_stream, width=Inches(4.5))
-                    
             except Exception as e:
                 print(f"Warning: Failed to load image - {e}")
 
@@ -215,6 +224,9 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 q_text += f" [{sq.target_clo}]"
             p.add_run(q_text).bold = True
             insert_image_if_exists(sq.image_url)
+            
+            if sq.sub_parts:
+                write_sub_parts(sq.sub_parts)
             doc.add_paragraph()  
 
     # 4. Write Long Questions 
@@ -227,17 +239,34 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                 q_text += f" [{lq.target_clo}]"
             p.add_run(q_text).bold = True
             insert_image_if_exists(lq.image_url)
+            
+            if lq.sub_parts:
+                write_sub_parts(lq.sub_parts)
             doc.add_paragraph()  
 
-    # 5. Write Scenarios / Code Sections 
+    # 5. Write Scenarios / Custom Types
     if exam.custom_scenarios:
-        scenarios_header = doc.add_paragraph()
-        scenarios_header.add_run("Scenarios & Code Analysis").bold = True
-        for i, scenario in enumerate(exam.custom_scenarios, 1):
-            p = doc.add_paragraph()
-            p.add_run(f"Question {i} ({scenario.marks} Marks)").bold = True
-            doc.add_paragraph(scenario.text)
-        doc.add_paragraph()
+        # Group incoming items by their defined 'type'
+        grouped_items = {}
+        for item in exam.custom_scenarios:
+            if item.type not in grouped_items:
+                grouped_items[item.type] = []
+            grouped_items[item.type].append(item)
+            
+        # Generate a dynamic section for each type
+        for item_type, items in grouped_items.items():
+            doc.add_paragraph()
+            type_header = doc.add_paragraph()
+            type_header.add_run(f"{item_type}").bold = True
+            
+            for i, scenario in enumerate(items, 1):
+                p = doc.add_paragraph()
+                p.add_run(f"Question {i} ({scenario.marks} Marks)").bold = True
+                doc.add_paragraph(scenario.text)
+                
+                if scenario.sub_parts:
+                    write_sub_parts(scenario.sub_parts)
+            doc.add_paragraph()
 
     # 6. Write Diagram Questions 
     if exam.diagram_questions:
