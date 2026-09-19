@@ -33,24 +33,28 @@ class MCQItem(BaseModel):
     options: List[str]
     target_clo: Optional[str] = None
     image_url: Optional[HttpUrl] = None
+    marks: float = 0.0
 
 class ShortQuestionItem(BaseModel):
     question: str
     target_clo: Optional[str] = None
     image_url: Optional[HttpUrl] = None
     sub_parts: List[SubPart] = []
+    marks: float = 0.0
 
 class LongQuestionItem(BaseModel):
     question: str
     target_clo: Optional[str] = None
     image_url: Optional[HttpUrl] = None
     sub_parts: List[SubPart] = []
+    marks: float = 0.0
 
 class FillInTheBlankItem(BaseModel):
     question: str
     answer: str 
     target_clo: Optional[str] = None
     image_url: Optional[HttpUrl] = None
+    marks: float = 0.0
 
 class DiagramQuestionItem(BaseModel):
     question: str
@@ -92,7 +96,6 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
     exam = payload.exam_data
     show_clo = payload.show_clo_tags
 
-    # Format the total marks cleanly just in case it's a whole number
     formatted_total_marks = f"{exam.total_marks:g}" if isinstance(exam.total_marks, float) else str(exam.total_marks)
 
     replacements = {
@@ -141,14 +144,9 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
                     replace_tags(p)
 
     # --- HELPER FORMATTING FUNCTIONS ---
-    def add_section_header(title: str, points: float, count: int):
+    def add_section_header(title: str):
         p = doc.add_paragraph()
-        tab_stops = p.paragraph_format.tab_stops
-        tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
-        # Using :g removes trailing zeros (e.g., 2.0 becomes 2, but 1.5 stays 1.5)
-        marks_str = f"[{points:g} x {count}]"
         p.add_run(title).bold = True
-        p.add_run(f"\t{marks_str}").bold = True
 
     def write_sub_parts(sub_parts: List[SubPart]):
         labels = ['(a)', '(b)', '(c)', '(d)', '(e)', '(f)', '(g)', '(h)', '(i)', '(j)']
@@ -191,13 +189,20 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
 
     # 1. Write MCQs 
     if exam.mcqs:
-        add_section_header("Multiple Choice Questions", exam.marks.mcq_points, len(exam.mcqs))
+        add_section_header("Multiple Choice Questions")
         for i, mcq in enumerate(exam.mcqs, 1):
             p = doc.add_paragraph()
+            tab_stops = p.paragraph_format.tab_stops
+            tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+
             q_text = f"{i}. {mcq.question}"
             if show_clo and mcq.target_clo:
                 q_text += f" [{mcq.target_clo}]"
             p.add_run(q_text).bold = True
+            
+            if mcq.marks > 0:
+                p.add_run(f"\t[{mcq.marks:g} Marks]").bold = True
+                
             insert_image_if_exists(mcq.image_url)
             
             labels = ['a)', 'b)', 'c)', 'd)']
@@ -208,25 +213,39 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
 
     # 2. Write Fill in the Blanks 
     if exam.fillInTheBlanks:
-        add_section_header("Fill in the Blanks", exam.marks.fib_points, len(exam.fillInTheBlanks))
+        add_section_header("Fill in the Blanks")
         for i, fib in enumerate(exam.fillInTheBlanks, 1):
             p = doc.add_paragraph()
+            tab_stops = p.paragraph_format.tab_stops
+            tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+
             q_text = f"{i}. {fib.question}"
             if show_clo and fib.target_clo:
                 q_text += f" [{fib.target_clo}]"
             p.add_run(q_text).bold = True
+
+            if fib.marks > 0:
+                p.add_run(f"\t[{fib.marks:g} Marks]").bold = True
+
             insert_image_if_exists(fib.image_url)
         doc.add_paragraph()
 
     # 3. Write Short Questions 
     if exam.shortQuestions:
-        add_section_header("Short Answer Questions", exam.marks.short_points, len(exam.shortQuestions))
+        add_section_header("Short Answer Questions")
         for i, sq in enumerate(exam.shortQuestions, 1):
             p = doc.add_paragraph()
+            tab_stops = p.paragraph_format.tab_stops
+            tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+
             q_text = f"{i}. {sq.question}"
             if show_clo and sq.target_clo:
                 q_text += f" [{sq.target_clo}]"
             p.add_run(q_text).bold = True
+
+            if sq.marks > 0:
+                p.add_run(f"\t[{sq.marks:g} Marks]").bold = True
+
             insert_image_if_exists(sq.image_url)
             
             if sq.sub_parts:
@@ -235,13 +254,20 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
 
     # 4. Write Long Questions 
     if exam.longQuestions:
-        add_section_header("Long Answer Questions", exam.marks.long_points, len(exam.longQuestions))
+        add_section_header("Long Answer Questions")
         for i, lq in enumerate(exam.longQuestions, 1):
             p = doc.add_paragraph()
+            tab_stops = p.paragraph_format.tab_stops
+            tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+
             q_text = f"{i}. {lq.question}"
             if show_clo and lq.target_clo:
                 q_text += f" [{lq.target_clo}]"
             p.add_run(q_text).bold = True
+
+            if lq.marks > 0:
+                p.add_run(f"\t[{lq.marks:g} Marks]").bold = True
+
             insert_image_if_exists(lq.image_url)
             
             if lq.sub_parts:
@@ -263,7 +289,14 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
             
             for i, scenario in enumerate(items, 1):
                 p = doc.add_paragraph()
-                p.add_run(f"Question {i} ({scenario.marks:g} Marks)").bold = True
+                tab_stops = p.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+
+                p.add_run(f"Question {i}").bold = True
+                
+                if scenario.marks > 0:
+                    p.add_run(f"\t[{scenario.marks:g} Marks]").bold = True
+                    
                 doc.add_paragraph(scenario.text)
                 
                 if scenario.sub_parts:
@@ -278,10 +311,17 @@ def process_exam(payload: DocumentRequest) -> io.BytesIO:
         
         for i, dq in enumerate(exam.diagram_questions, 1):
             p = doc.add_paragraph()
-            q_text = f"{i}. {dq.question} ({dq.marks:g} Marks)"
+            tab_stops = p.paragraph_format.tab_stops
+            tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+
+            q_text = f"{i}. {dq.question}"
             if show_clo and dq.target_clo:
                 q_text += f" [{dq.target_clo}]"
             p.add_run(q_text).bold = True
+            
+            if dq.marks > 0:
+                p.add_run(f"\t[{dq.marks:g} Marks]").bold = True
+
             insert_image_if_exists(dq.image_url)
             doc.add_paragraph()
 
